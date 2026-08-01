@@ -1,0 +1,23 @@
+# Variáveis de ambiente
+.env
+
+# Arquivos compilados
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Binários Go
+bin/
+
+# Coverage
+*.out
+coverage.out
+
+# VS Code
+.vscode/
+
+# Sistema Operacional
+.DS_Store
+Thumbs.db
