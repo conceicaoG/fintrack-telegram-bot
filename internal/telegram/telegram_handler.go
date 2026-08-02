@@ -1,20 +1,43 @@
 package telegram
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/conceicaoG/fintrack-telegram-bot/internal/fintrackclient"
+	"github.com/conceicaoG/fintrack-telegram-bot/internal/inteligencia"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+type Handler struct {
+	bot                 *tgbotapi.BotAPI
+	inteligenciaService *inteligencia.Service
+	fintrackClient      *fintrackclient.Client
+}
+
 var conversas = make(map[int64]*EstadoConversa)
 
-func IniciarBot() {
+func NovoHandler(
+	bot *tgbotapi.BotAPI,
+	inteligenciaService *inteligencia.Service,
+	fintrackClient *fintrackclient.Client,
+) *Handler {
+	return &Handler{
+		bot:                 bot,
+		inteligenciaService: inteligenciaService,
+		fintrackClient:      fintrackClient,
+	}
+}
+
+func IniciarBot(
+	inteligenciaService *inteligencia.Service,
+	fintrackClient *fintrackclient.Client,
+) {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
 
 	if token == "" {
@@ -23,10 +46,16 @@ func IniciarBot() {
 
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
-		log.Fatal("Erro ao conectar com o Telegram:", err)
+		log.Fatal("erro ao conectar com o Telegram:", err)
 	}
 
-	log.Printf("Bot conectado: @%s", bot.Self.UserName)
+	handler := NovoHandler(
+		bot,
+		inteligenciaService,
+		fintrackClient,
+	)
+
+	log.Printf("[BOT] Conectado: @%s", bot.Self.UserName)
 
 	updateConfig := tgbotapi.NewUpdate(0)
 	updateConfig.Timeout = 60
@@ -34,240 +63,232 @@ func IniciarBot() {
 	updates := bot.GetUpdatesChan(updateConfig)
 
 	for update := range updates {
-		if update.Message == nil {
-			continue
-		}
-
-		chatID := update.Message.Chat.ID
-		texto := strings.TrimSpace(update.Message.Text)
-
-		log.Printf(
-			"Mensagem recebida de %s: %s",
-			update.Message.From.UserName,
-			texto,
-		)
-
-		if update.Message.IsCommand() {
-			processarComando(
-				bot,
-				chatID,
-				update.Message.Command(),
-			)
-			continue
-		}
-
-		processarResposta(bot, chatID, texto)
+		handler.processarUpdate(update)
 	}
 }
 
-func processarComando(
-	bot *tgbotapi.BotAPI,
+func (h *Handler) processarUpdate(update tgbotapi.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	chatID := update.Message.Chat.ID
+	texto := strings.TrimSpace(update.Message.Text)
+
+	log.Printf(
+		"[BOT] Mensagem recebida de %s: %s",
+		update.Message.From.UserName,
+		texto,
+	)
+
+	if update.Message.IsCommand() {
+		h.processarComando(
+			chatID,
+			update.Message.Command(),
+		)
+		return
+	}
+
+	h.processarMensagem(chatID, texto)
+}
+
+func (h *Handler) processarComando(
 	chatID int64,
 	comando string,
 ) {
 	switch comando {
-	case "start":
-		conversas[chatID] = &EstadoConversa{
-			Etapa: EtapaEscolherCategoria,
-		}
-
-		enviarMensagem(
-			bot,
-			chatID,
-			`Olá! Vamos registrar um novo gasto 💰
-
-Escolha uma categoria:
-
-/mercado
-/alimentacao
-/transporte
-/moradia
-/saude
-/educacao
-/lazer
-/compras
-/contas
-/investimentos
-/outros`,
-		)
-
-	case "mercado":
-		selecionarCategoria(bot, chatID, "Mercado")
-
-	case "alimentacao":
-		selecionarCategoria(bot, chatID, "Alimentação")
-
-	case "transporte":
-		selecionarCategoria(bot, chatID, "Transporte")
-
-	case "moradia":
-		selecionarCategoria(bot, chatID, "Moradia")
-
-	case "saude":
-		selecionarCategoria(bot, chatID, "Saúde")
-
-	case "educacao":
-		selecionarCategoria(bot, chatID, "Educação")
-
-	case "lazer":
-		selecionarCategoria(bot, chatID, "Lazer")
-
-	case "compras":
-		selecionarCategoria(bot, chatID, "Compras")
-
-	case "contas":
-		selecionarCategoria(bot, chatID, "Contas")
-
-	case "investimentos":
-		selecionarCategoria(bot, chatID, "Investimentos")
-
-	case "outros":
-		selecionarCategoria(bot, chatID, "Outros")
+	case "start", "ajuda":
+		h.enviarApresentacao(chatID)
 
 	case "confirmar":
-		confirmarDespesa(bot, chatID)
+		h.confirmarDespesa(chatID)
 
 	case "cancelar":
+		h.cancelarDespesa(chatID)
+
+	default:
+		h.enviarMensagem(
+			chatID,
+			"Comando não reconhecido. Digite /ajuda para ver como usar o FinTrack.",
+		)
+	}
+}
+
+func (h *Handler) enviarApresentacao(chatID int64) {
+	h.enviarMensagem(
+		chatID,
+		`Olá! 👋 Eu sou o agente do FinTrack.
+
+Envie seu gasto em uma frase, por exemplo:
+
+• Papel higiênico 20,80
+• Conta de luz 150
+• Uber 35 ontem
+• Comprei uma camisa por 89,90 na Shopee
+
+Eu vou interpretar as informações e pedir sua confirmação antes de salvar.`,
+	)
+}
+
+func (h *Handler) processarMensagem(
+	chatID int64,
+	texto string,
+) {
+	if texto == "" {
+		h.enviarMensagem(
+			chatID,
+			"Envie uma mensagem com a descrição e o valor do gasto.",
+		)
+		return
+	}
+
+	estado, existe := conversas[chatID]
+
+	if existe {
+		switch estado.Etapa {
+		case EtapaAguardarEsclarecimento:
+			h.processarEsclarecimento(
+				chatID,
+				estado,
+				texto,
+			)
+			return
+
+		case EtapaAguardarConfirmacao:
+			h.enviarMensagem(
+				chatID,
+				"Existe uma despesa aguardando confirmação.\n\nDigite /confirmar ou /cancelar.",
+			)
+			return
+		}
+	}
+
+	if ehCumprimento(texto) {
+		h.enviarApresentacao(chatID)
+		return
+	}
+
+	h.interpretarMensagemComIA(chatID, texto)
+}
+
+func (h *Handler) interpretarMensagemComIA(
+	chatID int64,
+	texto string,
+) {
+	h.enviarMensagem(
+		chatID,
+		"Estou analisando seu gasto... 🤖",
+	)
+
+	despesa, err := h.inteligenciaService.InterpretarDespesa(
+		context.Background(),
+		texto,
+	)
+	if err != nil {
+		log.Printf(
+			"[BOT] Erro ao interpretar mensagem com Gemini: %v",
+			err,
+		)
+
 		delete(conversas, chatID)
 
-		enviarMensagem(
-			bot,
+		h.enviarMensagem(
 			chatID,
-			"Cadastro cancelado. Digite /start para começar novamente.",
-		)
+			`Não consegui interpretar esse gasto.
 
-	default:
-		enviarMensagem(
-			bot,
-			chatID,
-			"Comando não reconhecido. Digite /start para registrar um gasto.",
-		)
-	}
-}
+Tente novamente escrevendo, por exemplo:
 
-func selecionarCategoria(
-	bot *tgbotapi.BotAPI,
-	chatID int64,
-	categoria string,
-) {
-	estado, existe := conversas[chatID]
-
-	if !existe {
-		estado = &EstadoConversa{}
-		conversas[chatID] = estado
-	}
-
-	estado.Categoria = categoria
-	estado.Etapa = EtapaAguardarDescricao
-
-	enviarMensagem(
-		bot,
-		chatID,
-		fmt.Sprintf(
-			"Categoria selecionada: %s.\n\nO que você comprou?",
-			categoria,
-		),
-	)
-}
-
-func processarResposta(
-	bot *tgbotapi.BotAPI,
-	chatID int64,
-	texto string,
-) {
-	estado, existe := conversas[chatID]
-
-	if !existe {
-		enviarMensagem(
-			bot,
-			chatID,
-			"Digite /start para começar o cadastro de uma despesa.",
+"Uber 20,80"`,
 		)
 		return
 	}
 
-	switch estado.Etapa {
-	case EtapaEscolherCategoria:
-		enviarMensagem(
-			bot,
-			chatID,
-			"Escolha uma categoria usando um dos comandos disponíveis.",
-		)
-
-	case EtapaAguardarDescricao:
-		processarDescricao(bot, chatID, estado, texto)
-
-	case EtapaAguardarValor:
-		processarValor(bot, chatID, estado, texto)
-
-	case EtapaAguardarConfirmacao:
-		enviarMensagem(
-			bot,
-			chatID,
-			"Digite /confirmar para salvar ou /cancelar para desistir.",
-		)
-
-	default:
-		enviarMensagem(
-			bot,
-			chatID,
-			"Não consegui identificar a etapa atual. Digite /start novamente.",
-		)
+	estado := &EstadoConversa{
+		Descricao:   despesa.Descricao,
+		Valor:       despesa.Valor,
+		Categoria:   despesa.Categoria,
+		DataDespesa: despesa.DataDespesa,
+		Opcoes:      despesa.Opcoes,
 	}
+
+	conversas[chatID] = estado
+
+	if despesa.PrecisaEsclarecimento {
+		estado.Etapa = EtapaAguardarEsclarecimento
+
+		mensagem := despesa.Pergunta
+
+		if len(despesa.Opcoes) > 0 {
+			mensagem += "\n\nEscolha uma opção:\n"
+
+			for _, opcao := range despesa.Opcoes {
+				mensagem += fmt.Sprintf("• %s\n", opcao)
+			}
+		}
+
+		h.enviarMensagem(chatID, mensagem)
+		return
+	}
+
+	estado.Etapa = EtapaAguardarConfirmacao
+	h.enviarResumoConfirmacao(chatID, estado)
 }
 
-func processarDescricao(
-	bot *tgbotapi.BotAPI,
+func (h *Handler) processarEsclarecimento(
 	chatID int64,
 	estado *EstadoConversa,
-	descricao string,
+	resposta string,
 ) {
-	if descricao == "" {
-		enviarMensagem(
-			bot,
-			chatID,
-			"A descrição não pode ficar vazia. Digite o nome do que voce comprou.",
-		)
-		return
-	}
-
-	estado.Descricao = descricao
-	estado.Etapa = EtapaAguardarValor
-
-	enviarMensagem(
-		bot,
-		chatID,
-		"Qual foi o valor?\nExemplo: 20,80",
+	categoriaEscolhida := encontrarOpcao(
+		resposta,
+		estado.Opcoes,
 	)
-}
 
-func processarValor(
-	bot *tgbotapi.BotAPI,
-	chatID int64,
-	estado *EstadoConversa,
-	texto string,
-) {
-	valorTexto := strings.ReplaceAll(texto, ",", ".")
+	if categoriaEscolhida == "" {
+		mensagem := "Não reconheci essa opção. Escolha uma destas categorias:\n\n"
 
-	valor, err := strconv.ParseFloat(valorTexto, 64)
-	if err != nil || valor <= 0 {
-		enviarMensagem(
-			bot,
-			chatID,
-			"Valor inválido. Digite apenas o valor, por exemplo: 20,80",
-		)
+		for _, opcao := range estado.Opcoes {
+			mensagem += fmt.Sprintf("• %s\n", opcao)
+		}
+
+		h.enviarMensagem(chatID, mensagem)
 		return
 	}
 
-	estado.Valor = valor
+	estado.Categoria = categoriaEscolhida
+	estado.Opcoes = nil
 	estado.Etapa = EtapaAguardarConfirmacao
 
-	resumo := fmt.Sprintf(
-		`Confirma este gasto?
+	h.enviarResumoConfirmacao(chatID, estado)
+}
+
+func encontrarOpcao(
+	resposta string,
+	opcoes []string,
+) string {
+	resposta = strings.TrimSpace(resposta)
+
+	for _, opcao := range opcoes {
+		if strings.EqualFold(resposta, opcao) {
+			return opcao
+		}
+	}
+
+	return ""
+}
+
+func (h *Handler) enviarResumoConfirmacao(
+	chatID int64,
+	estado *EstadoConversa,
+) {
+	mensagem := fmt.Sprintf(
+		`Entendi seu gasto 📝
 
 Descrição: %s
 Categoria: %s
 Valor: R$ %.2f
+
+Está tudo certo?
 
 /confirmar
 /cancelar`,
@@ -276,45 +297,48 @@ Valor: R$ %.2f
 		estado.Valor,
 	)
 
-	enviarMensagem(bot, chatID, resumo)
+	h.enviarMensagem(chatID, mensagem)
 }
 
-func confirmarDespesa(
-	bot *tgbotapi.BotAPI,
-	chatID int64,
-) {
+func (h *Handler) confirmarDespesa(chatID int64) {
 	estado, existe := conversas[chatID]
 
 	if !existe || estado.Etapa != EtapaAguardarConfirmacao {
-		enviarMensagem(
-			bot,
+		h.enviarMensagem(
 			chatID,
 			"Não existe uma despesa aguardando confirmação.",
 		)
 		return
 	}
 
-	client := fintrackclient.NovoClient()
+	dataDespesa := estado.DataDespesa
 
-	dataAtual := time.Now().
-		UTC().
-		Format("2006-01-02T00:00:00Z")
+	if dataDespesa == "" {
+		dataDespesa = dataAtualRFC3339()
+	}
 
 	request := fintrackclient.CriarDespesaRequest{
 		Descricao:   estado.Descricao,
 		Valor:       estado.Valor,
 		Categoria:   estado.Categoria,
-		DataDespesa: dataAtual,
+		DataDespesa: dataDespesa,
 	}
 
-	despesaCriada, err := client.CriarDespesa(request)
-	if err != nil {
-		log.Println("Erro ao cadastrar despesa:", err)
+	log.Printf(
+		"[BOT] Enviando despesa para o BFA: %+v",
+		request,
+	)
 
-		enviarMensagem(
-			bot,
+	despesaCriada, err := h.fintrackClient.CriarDespesa(request)
+	if err != nil {
+		log.Printf(
+			"[BOT] Erro ao cadastrar despesa: %v",
+			err,
+		)
+
+		h.enviarMensagem(
 			chatID,
-			"Não consegui registrar a despesa. Tente novamente.",
+			"Não consegui registrar a despesa. Digite /confirmar para tentar novamente ou /cancelar.",
 		)
 		return
 	}
@@ -322,29 +346,79 @@ func confirmarDespesa(
 	mensagem := fmt.Sprintf(
 		`✅ Despesa registrada com sucesso!
 
-ID: %d
-Descrição: %s
-Categoria: %s
-Valor: R$ %.2f`,
-		despesaCriada.ID,
+🛒 Descrição: %s
+📦 Categoria: %s
+💰 Valor: R$ %.2f
+
+Seu gasto foi salvo no FinTrack.`,
 		despesaCriada.Descricao,
 		despesaCriada.Categoria,
 		despesaCriada.Valor,
 	)
-
-	enviarMensagem(bot, chatID, mensagem)
+	h.enviarMensagem(chatID, mensagem)
 
 	delete(conversas, chatID)
 }
 
-func enviarMensagem(
-	bot *tgbotapi.BotAPI,
+func (h *Handler) cancelarDespesa(chatID int64) {
+	_, existe := conversas[chatID]
+
+	if !existe {
+		h.enviarMensagem(
+			chatID,
+			"Não existe uma despesa em andamento.",
+		)
+		return
+	}
+
+	delete(conversas, chatID)
+
+	h.enviarMensagem(
+		chatID,
+		"Despesa cancelada. Envie outro gasto quando quiser.",
+	)
+}
+
+func dataAtualRFC3339() string {
+	return time.Now().
+		UTC().
+		Format("2006-01-02T00:00:00Z")
+}
+
+func (h *Handler) enviarMensagem(
 	chatID int64,
 	texto string,
 ) {
 	mensagem := tgbotapi.NewMessage(chatID, texto)
 
-	if _, err := bot.Send(mensagem); err != nil {
-		log.Println("Erro ao enviar mensagem:", err)
+	if _, err := h.bot.Send(mensagem); err != nil {
+		log.Printf(
+			"[BOT] Erro ao enviar mensagem: %v",
+			err,
+		)
 	}
+}
+
+func ehCumprimento(texto string) bool {
+	texto = strings.ToLower(strings.TrimSpace(texto))
+
+	cumprimentos := map[string]bool{
+		"oi":        true,
+		"olá":       true,
+		"ola":       true,
+		"e aí":      true,
+		"e ai":      true,
+		"bom dia":   true,
+		"boa tarde": true,
+		"boa noite": true,
+		"tudo bem":  true,
+		"tudo bem?": true,
+		"como vai":  true,
+		"como vai?": true,
+		"fala":      true,
+		"opa":       true,
+		"salve":     true,
+	}
+
+	return cumprimentos[texto]
 }
