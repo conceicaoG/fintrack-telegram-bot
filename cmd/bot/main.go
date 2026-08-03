@@ -16,18 +16,18 @@ func main() {
 	}
 
 	// Client da IA
-	inteligenciaClient, err := inteligencia.NovoClient()
+	inteligenciaClient, err := inteligencia.NewClient()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Service da IA
-	inteligenciaService := inteligencia.NovoService(
+	inteligenciaService := inteligencia.NewService(
 		inteligenciaClient,
 	)
 
 	// Client do BFA
-	fintrackClient := fintrackclient.NovoClient()
+	fintrackClient := fintrackclient.NewClient()
 
 	// Inicia o Telegram
 	telegram.IniciarBot(

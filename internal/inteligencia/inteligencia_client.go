@@ -13,7 +13,8 @@ type Client struct {
 	model  string
 }
 
-func NovoClient() (*Client, error) {
+// NewClient cria uma nova instância do Client para interagir com a API Gemini.
+func NewClient() (*Client, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 
 	if apiKey == "" {
@@ -42,6 +43,7 @@ func NovoClient() (*Client, error) {
 	}, nil
 }
 
+// GerarResposta envia um prompt para a API Gemini e retorna a resposta gerada.
 func (c *Client) GerarResposta(
 	ctx context.Context,
 	prompt string,

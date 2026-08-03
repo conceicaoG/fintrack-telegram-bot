@@ -15,7 +15,7 @@ type Client struct {
 	httpClient *http.Client
 }
 
-func NovoClient() *Client {
+func NewClient() *Client {
 	baseURL := os.Getenv("FINTRACK_BFA_URL")
 
 	if baseURL == "" {

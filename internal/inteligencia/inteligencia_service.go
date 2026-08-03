@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// Erros específicos para validação de despesas interpretadas pela IA.
 var (
 	ErrMensagemObrigatoria  = errors.New("mensagem obrigatória")
 	ErrRespostaInvalida     = errors.New("resposta inválida da inteligência")
@@ -18,6 +19,7 @@ var (
 	ErrOpcoesInvalidas      = errors.New("opções de esclarecimento inválidas")
 )
 
+// categoriasPermitidas define as categorias válidas para despesas.
 var categoriasPermitidas = map[string]bool{
 	"Mercado":       true,
 	"Alimentação":   true,
@@ -32,16 +34,19 @@ var categoriasPermitidas = map[string]bool{
 	"Outros":        true,
 }
 
+// Service é responsável por interpretar mensagens de despesas usando a IA.
 type Service struct {
 	client *Client
 }
 
-func NovoService(client *Client) *Service {
+// NewService cria uma nova instância do Service com o cliente de IA fornecido.
+func NewService(client *Client) *Service {
 	return &Service{
 		client: client,
 	}
 }
 
+// InterpretarDespesa interpreta a mensagem do usuário e retorna uma estrutura DespesaInterpretada.
 func (s *Service) InterpretarDespesa(
 	ctx context.Context,
 	mensagem string,
@@ -86,6 +91,7 @@ func (s *Service) InterpretarDespesa(
 	return despesa, nil
 }
 
+// normalizarDespesa ajusta os campos da despesa interpretada para um formato consistente.
 func normalizarDespesa(despesa *DespesaInterpretada) {
 	despesa.Descricao = strings.TrimSpace(despesa.Descricao)
 	despesa.Categoria = normalizarCategoria(despesa.Categoria)
@@ -96,6 +102,7 @@ func normalizarDespesa(despesa *DespesaInterpretada) {
 	}
 }
 
+// validarDespesaInterpretada verifica se os campos da despesa interpretada estão corretos e completos.
 func validarDespesaInterpretada(
 	despesa DespesaInterpretada,
 ) error {
@@ -140,11 +147,13 @@ func validarDespesaInterpretada(
 	return nil
 }
 
+// categoriaValida verifica se a categoria fornecida é uma das categorias permitidas.
 func categoriaValida(categoria string) bool {
 	_, existe := categoriasPermitidas[categoria]
 	return existe
 }
 
+// normalizarCategoria ajusta a categoria para um formato consistente, considerando variações de capitalização e acentuação.
 func normalizarCategoria(categoria string) string {
 	categoria = strings.TrimSpace(categoria)
 	categoriaMinuscula := strings.ToLower(categoria)
@@ -174,6 +183,7 @@ func normalizarCategoria(categoria string) string {
 	return categoria
 }
 
+// limparRespostaJSON remove elementos indesejados da resposta JSON retornada pela IA, garantindo que apenas o conteúdo relevante seja processado.
 func limparRespostaJSON(resposta string) string {
 	resposta = strings.TrimSpace(resposta)
 

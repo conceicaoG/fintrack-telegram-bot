@@ -14,6 +14,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// Handler é responsável por gerenciar a interação com o bot do Telegram, processando mensagens e comandos dos usuários.
 type Handler struct {
 	bot                 *tgbotapi.BotAPI
 	inteligenciaService *inteligencia.Service
@@ -22,6 +23,7 @@ type Handler struct {
 
 var conversas = make(map[int64]*EstadoConversa)
 
+// EstadoConversa mantém o estado atual da conversa com um usuário específico, incluindo informações sobre a despesa em andamento e a etapa do processo.
 func NovoHandler(
 	bot *tgbotapi.BotAPI,
 	inteligenciaService *inteligencia.Service,
@@ -34,6 +36,7 @@ func NovoHandler(
 	}
 }
 
+// IniciarBot inicia o bot do Telegram, configurando o cliente, o serviço de IA e o cliente do FinTrack, e começa a processar atualizações recebidas.
 func IniciarBot(
 	inteligenciaService *inteligencia.Service,
 	fintrackClient *fintrackclient.Client,
@@ -67,6 +70,7 @@ func IniciarBot(
 	}
 }
 
+// processarUpdate processa cada atualização recebida do Telegram, determinando se é uma mensagem ou comando e chamando os métodos apropriados para lidar com ela.
 func (h *Handler) processarUpdate(update tgbotapi.Update) {
 	if update.Message == nil {
 		return
@@ -92,6 +96,7 @@ func (h *Handler) processarUpdate(update tgbotapi.Update) {
 	h.processarMensagem(chatID, texto)
 }
 
+// processarComando lida com os comandos recebidos do usuário, como /start, /ajuda, /confirmar e /cancelar, chamando os métodos correspondentes para cada comando.
 func (h *Handler) processarComando(
 	chatID int64,
 	comando string,
@@ -114,6 +119,7 @@ func (h *Handler) processarComando(
 	}
 }
 
+// enviarApresentacao envia uma mensagem de apresentação ao usuário, explicando como o bot funciona e fornecendo exemplos de como enviar gastos para interpretação.
 func (h *Handler) enviarApresentacao(chatID int64) {
 	h.enviarMensagem(
 		chatID,
@@ -130,6 +136,7 @@ Eu vou interpretar as informações e pedir sua confirmação antes de salvar.`,
 	)
 }
 
+// processarMensagem lida com mensagens de texto recebidas do usuário, determinando se é uma saudação, uma despesa ou se há necessidade de esclarecimento, e chamando os métodos apropriados para cada caso.
 func (h *Handler) processarMensagem(
 	chatID int64,
 	texto string,
@@ -171,6 +178,7 @@ func (h *Handler) processarMensagem(
 	h.interpretarMensagemComIA(chatID, texto)
 }
 
+// interpretarMensagemComIA envia a mensagem do usuário para o serviço de IA para interpretação, processa a resposta e atualiza o estado da conversa, solicitando esclarecimentos ou confirmação conforme necessário.
 func (h *Handler) interpretarMensagemComIA(
 	chatID int64,
 	texto string,
@@ -234,6 +242,7 @@ Tente novamente escrevendo, por exemplo:
 	h.enviarResumoConfirmacao(chatID, estado)
 }
 
+// processarEsclarecimento lida com a resposta do usuário quando a IA solicitou esclarecimentos sobre a categoria da despesa, atualizando o estado da conversa e solicitando confirmação.
 func (h *Handler) processarEsclarecimento(
 	chatID int64,
 	estado *EstadoConversa,
@@ -262,6 +271,7 @@ func (h *Handler) processarEsclarecimento(
 	h.enviarResumoConfirmacao(chatID, estado)
 }
 
+// encontrarOpcao verifica se a resposta do usuário corresponde a uma das opções fornecidas pela IA, retornando a opção correspondente ou uma string vazia se não houver correspondência.
 func encontrarOpcao(
 	resposta string,
 	opcoes []string,
@@ -277,6 +287,7 @@ func encontrarOpcao(
 	return ""
 }
 
+// EstadoConversa mantém o estado atual da conversa com um usuário específico, incluindo informações sobre a despesa em andamento e a etapa do processo.
 func (h *Handler) enviarResumoConfirmacao(
 	chatID int64,
 	estado *EstadoConversa,
@@ -300,6 +311,7 @@ Está tudo certo?
 	h.enviarMensagem(chatID, mensagem)
 }
 
+// confirmarDespesa envia a despesa interpretada para o FinTrack, registrando-a no sistema, e envia uma mensagem de confirmação ao usuário. Caso haja algum erro, informa o usuário e mantém a despesa em estado de espera.
 func (h *Handler) confirmarDespesa(chatID int64) {
 	estado, existe := conversas[chatID]
 
@@ -360,6 +372,7 @@ Seu gasto foi salvo no FinTrack.`,
 	delete(conversas, chatID)
 }
 
+// cancelarDespesa cancela a despesa em andamento, removendo o estado da conversa e informando ao usuário que a despesa foi cancelada.
 func (h *Handler) cancelarDespesa(chatID int64) {
 	_, existe := conversas[chatID]
 
@@ -379,12 +392,14 @@ func (h *Handler) cancelarDespesa(chatID int64) {
 	)
 }
 
+// dataAtualRFC3339 retorna a data atual no formato RFC3339, que é utilizado para registrar a data da despesa no FinTrack.
 func dataAtualRFC3339() string {
 	return time.Now().
 		UTC().
 		Format("2006-01-02T00:00:00Z")
 }
 
+// enviarMensagem envia uma mensagem de texto para o usuário no Telegram, lidando com possíveis erros de envio e registrando-os no log.
 func (h *Handler) enviarMensagem(
 	chatID int64,
 	texto string,
@@ -399,6 +414,7 @@ func (h *Handler) enviarMensagem(
 	}
 }
 
+// ehCumprimento verifica se a mensagem recebida é uma saudação comum, retornando true se for, e false caso contrário.
 func ehCumprimento(texto string) bool {
 	texto = strings.ToLower(strings.TrimSpace(texto))
 

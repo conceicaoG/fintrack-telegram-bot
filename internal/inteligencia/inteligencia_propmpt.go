@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// montarPrompt cria um prompt para a IA interpretar a mensagem do usuário, incluindo regras e formato obrigatório para a resposta.
 func montarPrompt(mensagem string) string {
 	dataAtual := time.Now().Format("2006-01-02")
 
