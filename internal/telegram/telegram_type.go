@@ -16,4 +16,8 @@ type EstadoConversa struct {
 	Valor       float64
 	DataDespesa string
 	Opcoes      []string
+
+	TelegramUserID int64
+	Nome           string
+	Username       string
 }

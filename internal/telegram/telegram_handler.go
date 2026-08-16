@@ -79,9 +79,20 @@ func (h *Handler) processarUpdate(update tgbotapi.Update) {
 	chatID := update.Message.Chat.ID
 	texto := strings.TrimSpace(update.Message.Text)
 
+	telegramUserID := update.Message.From.ID
+
+	nome := strings.TrimSpace(
+		update.Message.From.FirstName + " " +
+			update.Message.From.LastName,
+	)
+
+	username := update.Message.From.UserName
+
 	log.Printf(
-		"[BOT] Mensagem recebida de %s: %s",
-		update.Message.From.UserName,
+		"[BOT] Mensagem recebida | telegramUserId=%d | nome=%s | username=%s | texto=%s",
+		telegramUserID,
+		nome,
+		username,
 		texto,
 	)
 
@@ -93,7 +104,13 @@ func (h *Handler) processarUpdate(update tgbotapi.Update) {
 		return
 	}
 
-	h.processarMensagem(chatID, texto)
+	h.processarMensagem(
+		chatID,
+		texto,
+		telegramUserID,
+		nome,
+		username,
+	)
 }
 
 // processarComando lida com os comandos recebidos do usuário, como /start, /ajuda, /confirmar e /cancelar, chamando os métodos correspondentes para cada comando.
@@ -140,6 +157,9 @@ Eu vou interpretar as informações e pedir sua confirmação antes de salvar.`,
 func (h *Handler) processarMensagem(
 	chatID int64,
 	texto string,
+	telegramUserID int64,
+	nome string,
+	username string,
 ) {
 	if texto == "" {
 		h.enviarMensagem(
@@ -175,13 +195,22 @@ func (h *Handler) processarMensagem(
 		return
 	}
 
-	h.interpretarMensagemComIA(chatID, texto)
+	h.interpretarMensagemComIA(
+		chatID,
+		texto,
+		telegramUserID,
+		nome,
+		username,
+	)
 }
 
 // interpretarMensagemComIA envia a mensagem do usuário para o serviço de IA para interpretação, processa a resposta e atualiza o estado da conversa, solicitando esclarecimentos ou confirmação conforme necessário.
 func (h *Handler) interpretarMensagemComIA(
 	chatID int64,
 	texto string,
+	telegramUserID int64,
+	nome string,
+	username string,
 ) {
 	h.enviarMensagem(
 		chatID,
@@ -212,11 +241,14 @@ Tente novamente escrevendo, por exemplo:
 	}
 
 	estado := &EstadoConversa{
-		Descricao:   despesa.Descricao,
-		Valor:       despesa.Valor,
-		Categoria:   despesa.Categoria,
-		DataDespesa: despesa.DataDespesa,
-		Opcoes:      despesa.Opcoes,
+		Descricao:      despesa.Descricao,
+		Valor:          despesa.Valor,
+		Categoria:      despesa.Categoria,
+		DataDespesa:    despesa.DataDespesa,
+		Opcoes:         despesa.Opcoes,
+		TelegramUserID: telegramUserID,
+		Nome:           nome,
+		Username:       username,
 	}
 
 	conversas[chatID] = estado
@@ -330,10 +362,17 @@ func (h *Handler) confirmarDespesa(chatID int64) {
 	}
 
 	request := fintrackclient.CriarDespesaRequest{
-		Descricao:   estado.Descricao,
-		Valor:       estado.Valor,
-		Categoria:   estado.Categoria,
-		DataDespesa: dataDespesa,
+		Usuario: fintrackclient.UsuarioRequest{
+			TelegramUserID: estado.TelegramUserID,
+			Nome:           estado.Nome,
+			Username:       estado.Username,
+		},
+		Despesa: fintrackclient.DespesaRequest{
+			Descricao:   estado.Descricao,
+			Valor:       estado.Valor,
+			Categoria:   estado.Categoria,
+			DataDespesa: dataDespesa,
+		},
 	}
 
 	log.Printf(
